@@ -1,0 +1,47 @@
+### CRITICAL REQUIERMENT Querying Rules:
+1.  **Status:** To find closed tickets, you must filter where `status_description` is exactly '>closed'.
+2.  **Dates:** This is a very important rule. All date fields (like `date_closed`, `date_entered`) are DATETIME fields, which means they contain both a date and a time (e.g., '2025-07-31 14:30:00').
+    - **WRONG:** A query like `WHERE date_closed = '2025-07-31'` will NEVER work because it tries to match the time '00:00:00'.
+    - **CORRECT:** To correctly query for a single day, you MUST remove the time component by casting the column to a DATE.
+    - **Example:** `WHERE CAST(date_closed AS DATE) = '2025-07-31'`
+3.  **Company Names:** When a user asks about a company, you must use a `LIKE` clause with wildcards to match the `company_name` field. For example: `WHERE company_name LIKE '%acme%'`.
+4.  **Limiting Results:** When a user asks for "top N" or "bottom N" results, you MUST use the `TOP N` clause at the beginning of the query. For example: `SELECT TOP 10 ...`.
+5.  **Dates Time Zones** and datetime field ending in '_UTC' is in utc time and must be converted to server local time. Additionally, any datetime field NOT ending in utc is already in local server time.
+6. **Help desk boards**: when no board_name (board) is mentioned assume help desk (hd) only. The tickets are found this way: (
+	(Board_name like 'GTS - Team %) or (Board_name = 'GTS - Help Desk) and (Board Name <> 'GTS - Team Training'))
+7. **Alert(s) board**: when asking for alert ticket the what to find them is (Board_name = 'GTS - Alerts')
+8. **Month only**: when a month is mentioned with no year, assume the current year. 
+9. **Work Flows**:the following 'technicians' are workflows or integrations: 'Automate', 'Automation', 'CWUTRIntegrator', 'NinjaAPI', 'OrdersUpdater', 'REWST', 'Thread', 'UserManager', 'Workflow', 'zadmin'
+10. **WorkFlows**: when asking about techs, always exclude workflows (see rule 9).
+11. **Companies**:companies that have a company_status_desc like 'FORMER CLIENT' or 'Inactive/Gone' have been offboard and are not active.
+12. **Offbording**: a company offboarding date can be inferred by looking at the last updated date in conjunction with rule 11.
+13. **Tech Titles**: when asking of techs the can be identified by the following titles ([Member_Type_Desc]): "Jr. Sys Admin:, "Tech Support Analyst", "Team Lead", "First Call Tech", "Sys Admin"
+14. **Team Leads**: team lead can be identified by the title ([Member_Type_Desc]) "Team Lead"
+15. **Time in Tickets**: the actual hours in a ticket is all the time recorded by all techs for that ticket.
+16. **Time entries**: time for an individual tech is found in v_rpt_time by member_id
+17. **time in tickets**: to find who recorded time in a ticket search for the ticket number in v_rpt_time.
+18. **Engineering tickets**: engineering ticket can be found on the "GTS - Engineering" board.
+19. **Telco Tickets**: Glink/Telco/global link ticket are the the "GTS - Telco" board.
+20. **Purchasing tickets**: ticket about purchasing/orders/quotes/shipments/deliveries can be found on the "GTS - Orders" board 
+21. **PC Setups**: pc/compute/laptop setups can be found by looking for ticket sub type = "Image PC" or sub type = "PC Setup Automation"
+22. **Call driver**: Service ticket Type is also know as Call driver
+23. **Call Driver description**: this a list of ticket types/call drivers and what they mean
+	access internet/Website: user says something like "i can't a access internet/Website"
+	access to/Missing data: user is missing or can't access some data
+	connect to WiFi: the user can not connect to wifi
+	fax/e-fax: the user can not send or receive faxs
+	login: the use is having issues logging into a system
+	make/receive calls: the user is have issues with telephone calls
+	Moves, adds, changes: these are requests for changes to user accounts, hardware setups, and related tasks
+	print/Scan: the user is having issues with a printer or scanner.
+	Security: this is for ticket about account take overs, phishing, spam, and other security incidents
+	send/receive email: the user is having issues with email
+	use mobile: this is for users having issues with their mobile phone
+	use software: the user is having problems using their application (e.g. work, excel, pcc, etc)
+	workstation/laptop: this is for ticket related to computer performance problems or hardware problems.
+24. **Like**: when phrases like 'name like' are used always us a like with wildcards around the name.
+
+
+
+
+

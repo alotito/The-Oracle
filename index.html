@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Data Chat</title>
+    <style>
+        body { font-family: sans-serif; max-width: 900px; margin: auto; padding: 20px; background-color: #f4f4f9; }
+        h1 { color: #333; }
+        
+        #controls-container, #help-buttons-container { display: flex; align-items: center; margin-bottom: 15px; }
+        #help-buttons-container button { background-color: #6c757d; }
+        button { padding: 8px 12px; border: none; border-radius: 4px; background-color: #007bff; color: white; cursor: pointer; margin-left: 5px; }
+        button:hover { opacity: 0.9; }
+
+        #question-input {
+            width: 70%;
+            padding: 8px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-family: sans-serif;
+            font-size: 1em;
+            resize: none; /* Disables the user's manual resize handle */
+            overflow-y: hidden; /* Hides the scrollbar, which we replace with expansion */
+            line-height: 1.5;
+            min-height: 24px; /* Matches the initial size */
+        }
+        
+        #config-status { margin-left: 15px; font-style: italic; color: green; }
+        
+        #details-container { margin-top: 15px; }
+        .details-panel { margin-top: 10px; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        #sql-panel { background-color: #f7f7f7; }
+        #llm-panel { background-color: #fff7f7; }
+
+        pre { background-color: #eef; padding: 10px; border-radius: 4px; white-space: pre-wrap; word-wrap: break-word; overflow-x: auto; }
+        code { font-family: 'Courier New', Courier, monospace; }
+
+        #response-container { margin-top: 20px; }
+        #result-container { border: 1px solid #ccc; padding: 10px; min-height: 100px; background-color: white; border-radius: 4px; }
+        #loader { text-align: center; padding: 20px; display: none; }
+        
+        .results-table { width: 100%; border-collapse: collapse; }
+        .results-table th, .results-table td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        .results-table th { background-color: #f2f2f2; }
+
+        .modal-overlay { display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); }
+        .modal-content { background-color: #fefefe; margin: 10% auto; padding: 20px; border: 1px solid #888; width: 80%; max-width: 700px; border-radius: 5px; position: relative; max-height: 80vh; overflow-y: auto; }
+        .modal-close { color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; }
+        .modal-close:hover, .modal-close:focus { color: black; }
+        .modal-header h2 { margin-top: 0; }
+        #modal-body ul { list-style-type: none; padding-left: 0; }
+        #modal-body li { margin-bottom: 10px; padding-left: 20px; text-indent: -20px; }
+        #modal-body li strong { color: #0056b3; }
+        #modal-body li em { color: #555; display: block; margin-left: 20px; font-style: italic;}
+
+        .schema-table { border: 1px solid #e0e0e0; border-radius: 5px; padding: 10px 15px; margin-bottom: 15px; background-color: #fdfdfd; }
+        .schema-table h3 { margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 5px; }
+        .schema-columns { list-style-type: none; padding-left: 0; }
+        .schema-column { margin-bottom: 8px; line-height: 1.4; }
+        .column-name { font-weight: bold; color: #000; }
+        .column-type { font-family: 'Courier New', Courier, monospace; color: #d9534f; margin-left: 8px; }
+        .column-comment { display: block; margin-left: 15px; font-style: italic; color: #555; }
+    </style>
+</head>
+<body>
+    <h1>Ask a question about your data</h1>
+    <div id="controls-container">
+        <textarea id="question-input" rows="1" placeholder="e.g., Show me the ticket trend for the last 30 days... (Shift+Enter for a new line)"></textarea>
+        <button onclick="askQuestion()">Ask</button>
+        <button onclick="reloadConfig()">Reload Config</button>
+        <span id="config-status"></span>
+    </div>
+
+    <div id="help-buttons-container">
+        <button onclick="showSchemas()">Show Known Schemas</button>
+        <button onclick="showQueryClues()">Show Query Clues</button>
+    </div>
+
+    <div id="details-container" style="display:none;">
+        <button onclick="toggleSqlPanel()">Show/Hide SQL Query</button>
+        <button onclick="toggleLlmPanel()" style="margin-left: 5px;">Show/Hide Raw LLM Output</button>
+        <button id="download-btn" onclick="downloadCSV()" style="margin-left: 5px;">Download CSV</button>
+        
+        <div id="sql-panel" class="details-panel" style="display:none;">
+             <h4>Extracted SQL Query:</h4>
+            <pre><code></code></pre>
+        </div>
+
+        <div id="llm-panel" class="details-panel" style="display:none;">
+            <h4>Raw LLM Output:</h4>
+            <pre><code></code></pre>
+        </div>
+    </div>
+
+    <div id="loader">Loading...</div>
+
+    <div id="response-container">
+        <div id="result-container"></div>
+    </div>
+    
+    <div id="info-modal" class="modal-overlay">
+        <div class="modal-content">
+            <div class="modal-header">
+                <span class="modal-close" onclick="hideModal()">&times;</span>
+                <h2 id="modal-title">Information</h2>
+            </div>
+            <div id="modal-body"></div>
+        </div>
+    </div>
+
+    <script>
+        let currentCsvData = '';
+        const modal = document.getElementById('info-modal');
+        
+        const questionInput = document.getElementById('question-input');
+
+        // This function handles the auto-expansion of the textarea
+        questionInput.addEventListener('input', () => {
+            questionInput.style.height = 'auto'; // Temporarily shrink to re-calculate
+            questionInput.style.height = (questionInput.scrollHeight) + 'px'; // Expand to fit content
+        });
+
+        // This function handles submitting with "Enter" and new lines with "Shift+Enter"
+        questionInput.addEventListener('keydown', (event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault(); // Prevent a new line from being added
+                askQuestion(); // Submit the question
+            }
+        });
+        
+        function showModal(title, htmlContent) {
+            document.getElementById('modal-title').innerText = title;
+            document.getElementById('modal-body').innerHTML = htmlContent;
+            modal.style.display = 'block';
+        }
+        function hideModal() {
+            modal.style.display = 'none';
+        }
+        window.onclick = function(event) {
+            if (event.target == modal) {
+                hideModal();
+            }
+        }
+        
+        function formatCluesAsList(cluesText) {
+            if (!cluesText) return 'No clues available.';
+            const lines = cluesText.split('\n').filter(line => line.trim() !== '');
+            let html = '<ul>';
+            lines.forEach(line => {
+                line = line.trim();
+                if (line.match(/^\d+\./) || line.startsWith('###')) {
+                    const parts = line.split(':');
+                    const boldPart = parts.shift();
+                    const rest = parts.join(':');
+                    html += `<li><strong>${boldPart}:</strong>${rest}</li>`;
+                } else {
+                    html += `<li><em>${line}</em></li>`;
+                }
+            });
+            html += '</ul>';
+            return html;
+        }
+
+        function formatSchemasAsHtml(schemasText) {
+            if (!schemasText) return '<p>No schemas available.</p>';
+            
+            const tables = schemasText.split('---').filter(t => t.trim() !== '');
+            let finalHtml = '';
+
+            tables.forEach(tableText => {
+                const tableNameMatch = tableText.match(/CREATE TABLE\s+([^\s(]+)/i);
+                const columnsMatch = tableText.match(/\(([\s\S]*)\)/);
+
+                if (!tableNameMatch || !columnsMatch) return;
+
+                const tableName = tableNameMatch[1];
+                const columnsText = columnsMatch[1];
+                
+                finalHtml += `<div class="schema-table"><h3>${tableName}</h3><ul class="schema-columns">`;
+
+                const columnLines = columnsText.split('\n');
+                columnLines.forEach(line => {
+                    line = line.trim();
+                    if (!line || line.startsWith(')')) return;
+
+                    const colPartsMatch = line.match(/^(\S+)\s+(.*?)(?:,)?\s*(?:--\s*(.*))?$/);
+                    if (colPartsMatch) {
+                        const colName = colPartsMatch[1];
+                        const colType = colPartsMatch[2];
+                        const colComment = colPartsMatch[3] || '';
+
+                        finalHtml += `
+                            <li class="schema-column">
+                                <span class="column-name">${colName}</span>
+                                <span class="column-type">${colType}</span>
+                                <span class="column-comment">${colComment}</span>
+                            </li>`;
+                    }
+                });
+                finalHtml += '</ul></div>';
+            });
+
+            return finalHtml;
+        }
+
+async function showSchemas() {
+    try {
+        const response = await fetch('/get_schemas');
+        if (!response.ok) throw new Error('Failed to fetch schemas.');
+        const data = await response.json();
+        const formattedHtml = formatSchemasAsHtml(data.schemas_text);
+
+        // Open a new blank tab
+        const newTab = window.open('', '_blank');
+
+        // Write the formatted schemas and styling into the new tab
+        newTab.document.write(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Known Database Schemas</title>
+                <style>
+                    body { font-family: sans-serif; padding: 20px; }
+                    .schema-table { border: 1px solid #e0e0e0; border-radius: 5px; padding: 10px 15px; margin-bottom: 15px; background-color: #fdfdfd; }
+                    .schema-table h3 { margin-top: 0; color: #333; border-bottom: 2px solid #007bff; padding-bottom: 5px; }
+                    .schema-columns { list-style-type: none; padding-left: 0; }
+                    .schema-column { margin-bottom: 8px; line-height: 1.4; }
+                    .column-name { font-weight: bold; color: #000; }
+                    .column-type { font-family: 'Courier New', Courier, monospace; color: #d9534f; margin-left: 8px; }
+                    .column-comment { display: block; margin-left: 15px; font-style: italic; color: #555; }
+                </style>
+            </head>
+            <body>
+                <h1>Known Database Schemas</h1>
+                ${formattedHtml}
+            </body>
+            </html>
+        `);
+
+        newTab.document.close(); // Finish writing to the document
+        newTab.focus(); // Switch focus to the new tab
+    } catch (error) {
+        alert(error.message);
+    }
+}
+
+        
+async function showQueryClues() {
+    try {
+        const response = await fetch('/get_query_clues');
+        if (!response.ok) throw new Error('Failed to fetch query clues.');
+        const data = await response.json();
+        const formattedClues = formatCluesAsList(data.clues_text);
+
+        // Open a new blank tab
+        const newTab = window.open('', '_blank');
+
+        // Write the formatted clues and styling into the new tab
+        newTab.document.write(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <title>Querying Clues & Rules</title>
+                <style>
+                    body { font-family: sans-serif; padding: 20px; line-height: 1.6; }
+                    h1 { color: #333; }
+                    ul { list-style-type: none; padding-left: 0; }
+                    li { margin-bottom: 12px; padding-left: 20px; text-indent: -20px; }
+                    strong { color: #0056b3; }
+                    em { color: #555; display: block; margin-left: 20px; font-style: italic;}
+                </style>
+            </head>
+            <body>
+                <h1>Querying Clues & Rules</h1>
+                ${formattedClues}
+            </body>
+            </html>
+        `);
+
+        newTab.document.close();
+        newTab.focus();
+    } catch (error) {
+        alert(error.message);
+    }
+}        function toggleSqlPanel() {
+            const panel = document.getElementById('sql-panel');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function toggleLlmPanel() {
+            const panel = document.getElementById('llm-panel');
+            panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function downloadCSV() {
+            if (!currentCsvData) {
+                alert('No data available to download.');
+                return;
+            }
+            const blob = new Blob([currentCsvData], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', 'query_results.csv');
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        async function reloadConfig() {
+            const statusSpan = document.getElementById('config-status');
+            statusSpan.textContent = 'Reloading...';
+            statusSpan.style.color = 'orange';
+            try {
+                const response = await fetch('/reload_config', { method: 'POST' });
+                const data = await response.json();
+                if (response.ok) {
+                    statusSpan.textContent = data.message;
+                    statusSpan.style.color = 'green';
+                } else {
+                    statusSpan.textContent = `Error: ${data.error}`;
+                    statusSpan.style.color = 'red';
+                }
+            } catch (e) {
+                statusSpan.textContent = 'Error reloading config!';
+                statusSpan.style.color = 'red';
+            }
+            setTimeout(() => { statusSpan.textContent = ''; }, 3000);
+        }
+
+        async function askQuestion() {
+            const question = document.getElementById('question-input').value;
+            const resultContainer = document.getElementById('result-container');
+            const detailsContainer = document.getElementById('details-container');
+            const sqlPanel = document.getElementById('sql-panel');
+            const llmPanel = document.getElementById('llm-panel');
+            const loader = document.getElementById('loader');
+            const downloadBtn = document.getElementById('download-btn');
+
+            resultContainer.innerHTML = '';
+            detailsContainer.style.display = 'none';
+            sqlPanel.style.display = 'none';
+            llmPanel.style.display = 'none';
+            downloadBtn.style.display = 'none';
+            currentCsvData = '';
+            loader.style.display = 'block';
+
+            try {
+                const response = await fetch('/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+
+                loader.style.display = 'none';
+                const data = await response.json();
+
+                if (data.raw_llm_output) {
+                    document.querySelector('#llm-panel code').textContent = data.raw_llm_output;
+                    detailsContainer.style.display = 'block';
+                }
+                if (data.sql_query) {
+                    document.querySelector('#sql-panel code').textContent = data.sql_query;
+                    detailsContainer.style.display = 'block';
+                }
+
+                if (!response.ok) {
+                    resultContainer.innerText = `Error: ${data.error || 'Unknown server error'}`;
+                    return;
+                }
+                
+                if (data.result_html) resultContainer.innerHTML = data.result_html;
+                
+                if (data.csv_data && data.csv_data.length > 0) {
+                    currentCsvData = data.csv_data;
+                    downloadBtn.style.display = 'inline-block';
+                }
+
+            } catch (error) {
+                loader.style.display = 'none';
+                resultContainer.innerText = `A network error occurred: ${error.message}`;
+            }
+        }
+    </script>
+</body>
+</html>
